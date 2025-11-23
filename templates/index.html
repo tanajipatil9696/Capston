@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Sentiment-Based Product Recommendations</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --bg:#f6f8fb;
+      --card:#ffffff;
+      --muted:#6b7280;
+      --accent:#4f46e5;
+      --accent-600:#4338ca;
+      --radius:12px;
+      --maxw:980px;
+    }
+    html,body{height:100%;}
+    body{
+      margin:0; font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
+      background:linear-gradient(180deg, #eef2ff 0%, var(--bg) 60%);
+      color:#0f172a; -webkit-font-smoothing:antialiased; min-height:100vh;
+    }
+    /* center the main container and provide consistent padding */
+    .container{width:100%; max-width:var(--maxw); margin:28px auto; padding:18px; box-sizing:border-box}
+    header{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px}
+    .brand{display:flex;align-items:center;gap:12px}
+    .logo{width:52px;height:52px;border-radius:10px;background:linear-gradient(135deg,var(--accent),var(--accent-600));display:flex;align-items:center;justify-content:center;color:white;font-weight:700}
+    h1{font-size:20px;margin:0}
+    p.lead{margin:0;color:var(--muted);font-size:14px}
+
+  .grid{display:grid;grid-template-columns:1fr 360px;gap:22px;align-items:start}
+  @media(max-width:980px){.grid{grid-template-columns:1fr;gap:14px}}
+
+  .card{background:var(--card);border-radius:var(--radius);box-shadow:0 6px 20px rgba(15,23,42,0.06);padding:18px}
+    .form-row{display:flex;gap:10px;align-items:center}
+    input[type=text], input[type=number], textarea{width:100%;padding:10px 12px;border:1px solid #e6e9ef;border-radius:8px;font-size:14px}
+    button.primary{background:linear-gradient(90deg,var(--accent),var(--accent-600));border:none;color:white;padding:10px 14px;border-radius:8px;cursor:pointer}
+    button.primary:hover{opacity:0.98}
+
+    .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+    .chip{background:#eef2ff;color:var(--accent-600);padding:6px 10px;border-radius:999px;font-size:13px}
+
+  table{width:100%;border-collapse:collapse;margin-top:12px;table-layout:fixed}
+    th,td{padding:10px;border-bottom:1px solid #f1f5f9;text-align:left;font-size:14px}
+  thead th{color:var(--muted);font-weight:600;font-size:13px}
+    tbody tr:hover{background:#fbfdff}
+
+    .muted{color:var(--muted);font-size:13px}
+    .result-badge{display:inline-block;padding:6px 10px;border-radius:999px;background:#f3f4f6;color:#111827;font-weight:600}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <nav style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px">
+        <div style="display:flex;align-items:center;gap:12px">
+          <div class="logo">SB</div>
+          <div>
+            <div style="font-weight:700">Sentiment-Based Recommendations</div>
+            <div class="muted" style="font-size:13px">Recommendations refined by review sentiment</div>
+          </div>
+        </div>
+
+        <div style="display:flex;align-items:center;gap:12px">
+          <input id="productSearch" placeholder="Search products" style="padding:8px 10px;border-radius:8px;border:1px solid #e6e9ef" />
+          <div class="muted">Ready • <span class="result-badge">{{ recommendation_matrix.shape[0] if recommendation_matrix is defined else 'N/A' }} users</span></div>
+          <button id="viewToggle" style="background:transparent;border:0;margin-left:8px;cursor:pointer;color:var(--accent-600);font-weight:600">Table view</button>
+          <button id="darkToggle" style="background:transparent;border:0;cursor:pointer;padding:6px 8px;border-radius:8px">🌙</button>
+        </div>
+      </nav>
+    </header>
+
+    <div class="grid">
+      <main>
+        <div class="card">
+          <h3 style="margin-top:0">Get Recommendations</h3>
+          {% if error %}
+            <div style="color:#b91c1c;margin-bottom:12px">{{ error }}</div>
+          {% endif %}
+          <form method="post" action="/recommend">
+            <label class="muted">User ID</label>
+            <input type="text" name="user_id" placeholder="Enter user id" value="{{ user_id if user_id is defined else '' }}">
+            <div style="display:flex;gap:12px;margin-top:12px;align-items:center">
+              <div style="flex:1">
+                <label class="muted">Number of recommendations</label>
+                <input type="number" name="top_n" min="1" max="20" value="5">
+              </div>
+              <div>
+                <label style="opacity:0">Do</label>
+                <button class="primary" type="submit">Get Recommendations</button>
+              </div>
+            </div>
+          </form>
+
+          <div class="muted" style="margin-top:14px">Sample user ids:</div>
+          <div class="chips" id="sampleChips">
+            {% for u in sample_users %}
+              <div class="chip" role="button" data-user="{{ u }}">{{ u }}</div>
+            {% endfor %}
+          </div>
+        </div>
+
+        {% if recommendations %}
+        <div class="card" style="margin-top:16px">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <h3 style="margin-top:0">Top Recommendations for {{ user_id }}</h3>
+            <div class="muted">Showing <strong>{{ recommendations|length }}</strong></div>
+          </div>
+
+          <!-- table view (default) -->
+          <div id="tableView" style="display:none">
+            <table>
+              <thead>
+                <tr><th>Rank</th><th>Product</th><th>Positive</th><th>Avg Rating</th><th>Reviews</th></tr>
+              </thead>
+                <tbody id="recTableBody">
+                  {% for rec in recommendations %}
+                    <tr class="rec-row" data-product="{{ rec.product }}" data-positive="{{ rec.positive_pct }}" data-rating="{{ rec.avg_rating if rec.avg_rating is not none else '' }}" data-count="{{ rec.review_count }}">
+                      <td>{{ loop.index }}</td>
+                      <td>{{ rec.product }}</td>
+                      <td>{{ rec.positive_pct }}%</td>
+                      <td>{{ rec.avg_rating if rec.avg_rating is not none else 'N/A' }}</td>
+                      <td>{{ rec.review_count }}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+            </table>
+          </div>
+
+          <!-- card view (toggleable) -->
+          <div id="cardView" style="display:block;margin-top:12px">
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px">
+              {% for rec in recommendations %}
+                <div class="product-card" data-product="{{ rec.product }}" data-positive="{{ rec.positive_pct }}" data-rating="{{ rec.avg_rating if rec.avg_rating is not none else '' }}" data-count="{{ rec.review_count }}" style="display:flex;gap:12px;align-items:center;padding:12px;border-radius:10px;border:1px solid #f1f5f9;background:linear-gradient(180deg,#fff,#fbfdff);transition:transform .18s ease,box-shadow .18s ease;cursor:pointer">
+                  <div style="width:72px;height:72px;border-radius:8px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#eef2ff,#e0e7ff);font-weight:700;color:var(--accent-600);font-size:18px">
+                    {{ rec.product[:2]|upper }}
+                  </div>
+                  <div style="flex:1">
+                    <div style="font-weight:700">{{ rec.product }}</div>
+                    <div class="muted" style="font-size:13px;margin-top:6px">Positive: <strong>{{ rec.positive_pct }}%</strong> · Rating: <strong>{{ rec.avg_rating if rec.avg_rating is not none else 'N/A' }}</strong></div>
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+        {% endif %}
+      </main>
+
+      <aside>
+        <div class="card">
+          <h4 style="margin-top:0">Quick Sentiment Check</h4>
+          <p class="muted">Paste a review to see predicted sentiment (probability shown if available).</p>
+          <textarea id="review_text" rows="5" style="width:100%;margin-top:8px"></textarea>
+          <div style="display:flex;gap:10px;margin-top:10px;align-items:center">
+            <button class="primary" onclick="checkSentiment()">Predict Sentiment</button>
+            <div id="sentiment_result" style="font-weight:600"></div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:12px">
+          <h4 style="margin-top:0">About</h4>
+          <p class="muted" style="margin:0">This demo uses a single pre-trained sentiment model and collaborative-filtering recommendation matrix. Use sample IDs or enter a username from the dataset.</p>
+        </div>
+      </aside>
+    </div>
+  </div>
+  <footer style="max-width:var(--maxw);margin:18px auto 36px;display:flex;justify-content:space-between;align-items:center;color:var(--muted);font-size:13px">
+    <div>Built with ❤️ — Sentiment-based recommender demo</div>
+    <div>Data preview • <span class="muted">{{ recommendations|length if recommendations is defined else 'N/A' }} results</span></div>
+  </footer>
+
+  <script>
+  async function checkSentiment(){
+    const el = document.getElementById('review_text');
+    const out = document.getElementById('sentiment_result');
+    const text = el.value.trim();
+    out.innerText = '';
+    if(!text){ out.innerText = 'Enter text to test sentiment'; return; }
+
+    try{
+      const resp = await fetch('/predict_sentiment', {
+        method:'POST',
+        headers: {'Content-Type':'application/x-www-form-urlencoded'},
+        body: 'review_text=' + encodeURIComponent(text)
+      });
+      const data = await resp.json();
+      if(data.error){ out.innerText = data.error; return; }
+      const label = data.prediction === 1 ? 'Positive' : 'Negative';
+      const prob = (data.probability_positive !== null && data.probability_positive !== undefined) ? ` (p=${data.probability_positive.toFixed(3)})` : '';
+      out.innerText = `${label}${prob}`;
+    }catch(err){ out.innerText = 'Error checking sentiment'; console.error(err); }
+  }
+  </script>
+
+  <script>
+  // clickable sample chips fill the input
+  document.addEventListener('DOMContentLoaded', function(){
+    const chips = document.getElementById('sampleChips');
+    const userInput = document.querySelector('input[name="user_id"]');
+    if(chips){
+      chips.addEventListener('click', function(e){
+        const chip = e.target.closest('.chip');
+        if(!chip) return;
+        const u = chip.getAttribute('data-user');
+        if(u){ userInput.value = u; }
+      });
+    }
+
+    // view toggle: card/table
+    const viewToggle = document.getElementById('viewToggle');
+    const tableView = document.getElementById('tableView');
+    const cardView = document.getElementById('cardView');
+    if(viewToggle){
+      viewToggle.addEventListener('click', function(){
+        const showing = cardView.style.display !== 'none';
+        cardView.style.display = showing ? 'none' : 'block';
+        tableView.style.display = showing ? 'block' : 'none';
+        viewToggle.innerText = showing ? 'Card view' : 'Table view';
+      });
+    }
+
+    // dark mode toggle
+    const darkToggle = document.getElementById('darkToggle');
+    function applyTheme(dark){
+      if(dark){ document.documentElement.classList.add('dark'); document.body.style.background = 'linear-gradient(180deg,#0f172a 0%, #0b1220 60%)'; darkToggle.innerText = '☀️'; }
+      else { document.documentElement.classList.remove('dark'); document.body.style.background = 'linear-gradient(180deg,#eef2ff 0%, var(--bg) 60%)'; darkToggle.innerText = '🌙'; }
+      localStorage.setItem('sb_theme_dark', dark ? '1' : '0');
+    }
+    const saved = localStorage.getItem('sb_theme_dark');
+    applyTheme(saved === '1');
+    if(darkToggle){ darkToggle.addEventListener('click', function(){ const now = localStorage.getItem('sb_theme_dark') === '1'; applyTheme(!now); }); }
+  });
+  </script>
+
+  <style>
+    /* dark theme variables */
+    .dark {
+      --bg: #071029;
+      --card: #0b1220;
+      --muted: #9aa4b2;
+      --accent-600: #7c6cff;
+      color: #e6eef8;
+      background: linear-gradient(180deg,#071029 0%, #021024 60%);
+    }
+    .chip{transition:transform .15s ease,box-shadow .15s ease}
+    .chip:hover{transform:translateY(-3px);box-shadow:0 6px 18px rgba(16,24,40,0.06)}
+    .product-card:hover{transform:translateY(-6px);box-shadow:0 18px 40px rgba(2,6,23,0.12)}
+  .rec-row{cursor:pointer}
+    .primary{transition:transform .12s ease,box-shadow .12s ease}
+    .primary:active{transform:translateY(1px)}
+    /* modal */
+    .modal-backdrop{position:fixed;inset:0;background:rgba(2,6,23,0.5);display:flex;align-items:center;justify-content:center;z-index:60}
+    .modal{background:var(--card);padding:18px;border-radius:12px;max-width:720px;width:92%;box-shadow:0 20px 60px rgba(2,6,23,0.3)}
+    .modal h3{margin:0 0 8px}
+    .modal .meta{color:var(--muted);font-size:13px;margin-bottom:10px}
+    .modal .close{background:transparent;border:0;font-size:18px;cursor:pointer}
+  </style>
+
+  <!-- product detail modal (hidden) -->
+  <div id="productModal" style="display:none">
+    <div class="modal-backdrop" id="modalBackdrop">
+      <div class="modal" role="dialog" aria-modal="true">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <h3 id="modalTitle">Product</h3>
+          <button class="close" id="modalClose">✕</button>
+        </div>
+        <div class="meta" id="modalMeta">Positive: -- · Rating: -- · Reviews: --</div>
+        <div id="modalBody">No additional details available in demo.</div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
