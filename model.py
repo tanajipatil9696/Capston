@@ -1,6 +1,7 @@
 import os
 import re
 import pickle
+import gzip
 import numpy as np
 import pandas as pd
 
@@ -34,7 +35,7 @@ def preprocess_text(text: str) -> str:
     return ' '.join(tokens)
 
 
-# Paths to serialized artifacts (expected in project root)
+# Paths to serialized artifacts (support both .pkl and .pkl.gz)
 BASE_DIR = os.path.dirname(__file__)
 SENTIMENT_MODEL_PATH = os.path.join(BASE_DIR, 'best_sentiment_model.pkl')
 VECTORIZER_PATH = os.path.join(BASE_DIR, 'tfidf_vectorizer.pkl')
@@ -43,13 +44,23 @@ PRODUCT_MAP_PATH = os.path.join(BASE_DIR, 'product_review_mapping.pkl')
 
 
 def _load_pickle(path):
-    if not os.path.exists(path):
-        raise FileNotFoundError(f'Required file not found: {path}')
-    with open(path, 'rb') as f:
-        return pickle.load(f)
+    """Load pickle from .pkl or .pkl.gz file. Try both formats."""
+    # Try uncompressed first
+    if os.path.exists(path):
+        with open(path, 'rb') as f:
+            return pickle.load(f)
+    
+    # Try compressed
+    gz_path = path + '.gz'
+    if os.path.exists(gz_path):
+        with gzip.open(gz_path, 'rb') as f:
+            return pickle.load(f)
+    
+    raise FileNotFoundError(f'Required file not found: {path} or {gz_path}')
 
 
 # Load artifacts (fail-fast if missing)
+print('\nLoading ML models and artifacts...')
 best_model = None
 tfidf_vectorizer = None
 recommendation_matrix = None
@@ -60,8 +71,9 @@ try:
     tfidf_vectorizer = _load_pickle(VECTORIZER_PATH)
     recommendation_matrix = _load_pickle(REC_MATRIX_PATH)
     product_review_mapping = _load_pickle(PRODUCT_MAP_PATH)
+    print('✓ All models loaded successfully\n')
 except Exception as e:
-    # Re-raise to make missing files explicit when app imports
+    print(f'✗ Error loading models: {e}\n')
     raise
 
 # Normalize recommendation_matrix to DataFrame with string index

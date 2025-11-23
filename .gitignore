@@ -3,4 +3,8 @@ __pycache__/
 *.pyc
 instance/
 *.log
+*.pkl
+!*.pkl.gz
+.DS_Store
+/tmp
 
